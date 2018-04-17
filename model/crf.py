@@ -375,6 +375,7 @@ class CRFDecode_vb():
             cur_values = cur_values + forscores.contiguous().view(bat_size, self.tagset_size, 1).expand(bat_size, self.tagset_size, self.tagset_size)
 
             forscores, cur_bp = torch.max(cur_values, 1)
+
             cur_bp.masked_fill_(mask[idx].view(bat_size, 1).expand(bat_size, self.tagset_size), self.end_tag)
             back_points.append(cur_bp)
 
@@ -383,4 +384,4 @@ class CRFDecode_vb():
         for idx in range(len(back_points)-2, -1, -1):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(bat_size, 1))
             decode_idx[idx] = pointer
-        return decode_idx
+        return decode_idx, torch.max(forscores)

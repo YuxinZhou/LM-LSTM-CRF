@@ -21,12 +21,12 @@ import functools
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluating LM-BLSTM-CRF')
-    parser.add_argument('--load_arg', default='./checkpoint/ner/ner_4_cwlm_lstm_crf.json', help='path to arg json')
-    parser.add_argument('--load_check_point', default='./checkpoint/ner/ner_4_cwlm_lstm_crf.model', help='path to model checkpoint file')
-    parser.add_argument('--gpu',type=int, default=0, help='gpu id')
+    parser.add_argument('--load_arg', default='./checkpoint/cwlm_lstm_crf.json', help='path to arg json')
+    parser.add_argument('--load_check_point', default='./checkpoint/cwlm_lstm_crf.model', help='path to model checkpoint file')
+    parser.add_argument('--gpu',type=int, default=-1, help='gpu id')
     parser.add_argument('--decode_type', choices=['label', 'string'], default='label', help='type of decode function, set `label` to couple label with text, or set `string` to insert label into test')
     parser.add_argument('--batch_size', type=int, default=50, help='size of batch')
-    parser.add_argument('--input_file', default='data/ner2003/test.txt', help='path to input un-annotated corpus')
+    parser.add_argument('--input_file', default='test.tsv', help='path to input un-annotated corpus')
     parser.add_argument('--output_file', default='annotate/output', help='path to output file')
     parser.add_argument('--dataset_no',type=int, default=5, help='number of the datasets')
     args = parser.parse_args()
@@ -76,11 +76,18 @@ if __name__ == "__main__":
             tmp = line.split()
             lines.append(tmp[0])
 
-    for idx in range(args.dataset_no):
-        print('annotating the entity type', idx)
-        fout = open(args.output_file+str(idx)+'.txt', 'w')
-        for feature in features:
-            predictor.output_batch(ner_model, feature, fout, idx)
-            fout.write('\n')
-        fout.close()
+    # for idx in range(args.dataset_no):
+    #     print('annotating the entity type', idx)
+    #     fout = open(args.output_file+str(idx)+'.txt', 'w')
+    #     for feature in features:
+    #         predictor.output_batch(ner_model, feature, fout, idx)
+    #         # predictor.combined_output_batch(ner_model, feature, fout)
+    #         fout.write('\n')
+    #     fout.close()
+
+    fout = open(args.output_file+str('_combine')+'.txt', 'w')
+    for feature in features:
+        predictor.combined_output_batch(ner_model, feature, fout, 5)
+        fout.write('\n')
+    fout.close()
 	        

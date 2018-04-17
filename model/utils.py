@@ -738,6 +738,7 @@ def iobes_to_spans(sequence, lut, strict_iob2=False):
     if current is not None:
         chunks.append('@'.join(current))
 
+
     return set(chunks)
 
 

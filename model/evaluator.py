@@ -57,6 +57,7 @@ class eval_batch:
             gold = gold[:length]
             best_path = decoded[:length]
 
+
             correct_labels_i, total_labels_i, gold_count_i, guess_count_i, overlap_count_i = self.eval_instance(best_path.numpy(), gold.numpy())
             self.correct_labels += correct_labels_i
             self.total_labels += total_labels_i
@@ -206,9 +207,10 @@ class eval_wc(eval_batch):
 
         for f_f, f_p, b_f, b_p, w_f, tg, mask_v, len_v in itertools.chain.from_iterable(dataset_loader):
             f_f, f_p, b_f, b_p, w_f, _, mask_v = self.packer.repack_vb(f_f, f_p, b_f, b_p, w_f, tg, mask_v, len_v)
+            # predict the entities using tags in file_no
+            # e.g. if file_no == 1, only GENE will be predicted
             scores = ner_model(f_f, f_p, b_f, b_p, w_f, file_no)
             decoded = self.decoder.decode(scores.data, mask_v.data)
-
-            self.eval_b(decoded, tg)
+            self.eval_b(decoded, tg)  # calc_f1_batch, process one batch
 
         return self.calc_s()

@@ -15,6 +15,7 @@ from tqdm import tqdm
 from model.crf import CRFDecode_vb
 from model.utils import *
 
+
 class predict:
     """Base class for prediction, provide method to calculate f1 score and accuracy 
 
@@ -25,7 +26,7 @@ class predict:
         batch_size: size of batch in decoding
     """
 
-    def __init__(self, if_cuda, l_map, label_seq = True, batch_size = 50):
+    def __init__(self, if_cuda, l_map, label_seq=True, batch_size=50):
         self.if_cuda = if_cuda
         self.l_map = l_map
         self.r_l_map = revlut(l_map)
@@ -43,7 +44,7 @@ class predict:
             feature (list): words list
             label (list): label list
         """
-        return '\n'.join(map(lambda t: t[0] + ' '+ self.r_l_map[t[1]], zip(feature, label)))
+        return '\n'.join(map(lambda t: t[0] + ' ' + self.r_l_map[t[1]], zip(feature, label)))
 
     def decode_s(self, feature, label):
         """
@@ -62,16 +63,16 @@ class predict:
             if label.startswith('B-'):
 
                 if current is not None:
-                    chunks += "</"+current+"> "
+                    chunks += "</" + current + "> "
                 current = label[2:]
-                chunks += "<"+current+"> " + f + " "
+                chunks += "<" + current + "> " + f + " "
 
             elif label.startswith('S-'):
 
                 if current is not None:
-                    chunks += " </"+current+"> "
+                    chunks += " </" + current + "> "
                 current = label[2:]
-                chunks += "<"+current+"> " + f + " </"+current+"> "
+                chunks += "<" + current + "> " + f + " </" + current + "> "
                 current = None
 
             elif label.startswith('I-'):
@@ -79,38 +80,38 @@ class predict:
                 if current is not None:
                     base = label[2:]
                     if base == current:
-                        chunks += f+" "
+                        chunks += f + " "
                     else:
-                        chunks += "</"+current+"> <"+base+"> " + f + " "
+                        chunks += "</" + current + "> <" + base + "> " + f + " "
                         current = base
                 else:
                     current = label[2:]
-                    chunks += "<"+current+"> " + f + " "
+                    chunks += "<" + current + "> " + f + " "
 
             elif label.startswith('E-'):
 
                 if current is not None:
                     base = label[2:]
                     if base == current:
-                        chunks += f + " </"+base+"> "
+                        chunks += f + " </" + base + "> "
                         current = None
                     else:
-                        chunks += "</"+current+"> <"+base+"> " + f + " </"+base+"> "
+                        chunks += "</" + current + "> <" + base + "> " + f + " </" + base + "> "
                         current = None
 
                 else:
                     current = label[2:]
-                    chunks += "<"+current+"> " + f + " </"+current+"> "
+                    chunks += "<" + current + "> " + f + " </" + current + "> "
                     current = None
 
             else:
                 if current is not None:
-                    chunks += "</"+current+"> "
-                chunks += f+" "
+                    chunks += "</" + current + "> "
+                chunks += f + " "
                 current = None
 
         if current is not None:
-            chunks += "</"+current+"> "
+            chunks += "</" + current + "> "
 
         return chunks
 
@@ -122,24 +123,89 @@ class predict:
             ner_model: sequence labeling model
             feature (list): list of words list
             fout: output file
+            file_no : file_id
         """
         ner_model.eval()
 
         d_len = len(documents)
-        for d_ind in tqdm( range(0, d_len), mininterval=1,
-                desc=' - Process', leave=False, file=sys.stdout):
+        for d_ind in tqdm(range(0, d_len), mininterval=1,
+                          desc=' - Process', leave=False, file=sys.stdout):
             fout.write('-DOCSTART- -DOCSTART- -DOCSTART-\n\n')
             features = documents[d_ind]
             f_len = len(features)
             for ind in range(0, f_len, self.batch_size):
                 eind = min(f_len, ind + self.batch_size)
-                labels = self.apply_model(ner_model, features[ind: eind], file_no)
+                labels, path_score = self.apply_model(ner_model, features[ind: eind], file_no)
                 labels = torch.unbind(labels, 1)
 
                 for ind2 in range(ind, eind):
                     f = features[ind2]
-                    l = labels[ind2 - ind][0: len(f) ]
+                    l = labels[ind2 - ind][0: len(f)]
                     fout.write(self.decode_str(features[ind2], l) + '\n\n')
+
+    def combined_output_batch(self, ner_model, documents, fout, dataset_no, strategy="best"):
+        """ Combine 5 result and output
+        args:
+            ner_model: sequence labeling model
+            feature (list): list of words list
+            fout: output file
+        """
+        ner_model.eval()  # Sets the module in evaluation mode.
+
+        d_len = len(documents)
+        for d_ind in tqdm(range(0, d_len), mininterval=1,
+                          desc=' - Process', leave=False, file=sys.stdout):
+            fout.write('-DOCSTART- -DOCSTART- -DOCSTART-\n\n')
+            features = documents[d_ind]
+            f_len = len(features)
+
+            # We are predicting sentence by sentence here
+            for ind in range(0, f_len, self.batch_size):
+                eind = min(f_len, ind + self.batch_size)
+                seperate_predictions = []
+                for i in range(dataset_no):  # iterate on five CDR
+                    labels, path_score = self.apply_model(ner_model, features[ind: eind], i)
+                    labels = torch.unbind(labels, 1)
+                    for ind2 in range(ind, eind):
+                        f = features[ind2]
+                        l = labels[ind2 - ind][0: len(f)]
+                        print(path_score)
+                        seperate_predictions.append((path_score, l))
+                if strategy == "vote":
+                    combine = self.combine_prediction_vote(seperate_predictions)
+                else:  # best path
+                    combine = self.combine_prediction(seperate_predictions)
+                fout.write(self.decode_str(features[0], combine) + '\n\n')
+
+    def combine_prediction(self, seperate_predictions):
+        """
+        Combine separated preditions on different CDRS
+        :param seperate_predictions: (path_score, decode_path)
+        :return: a combined prediction
+        """
+        seperate_predictions.sort()
+        combined = seperate_predictions[0][1].clone()  # first prediction sequence
+        for idx in range(1, len(seperate_predictions)):
+            label_seq = seperate_predictions[idx][1]
+            combined = self.combine_seq(label_seq, combined)
+        return combined
+
+    def combine_seq(self, seq1, seq2):
+        # seq1 has higher priority, and we retain all chunks in seq1.
+        # We add chunks in seq2 if it does not conflict with chunks in seq1.
+        seq1_chunks = iobes_to_spans(seq1, self.r_l_map)
+        seq1_chunks = [set(chunk.split('@')[1:]) for chunk in seq1_chunks]
+        seq2_chunks = iobes_to_spans(seq2, self.r_l_map)
+        seq2_chunks = [set(chunk.split('@')[1:]) for chunk in seq2_chunks]
+        output_seq = seq1.clone()
+        seq1_chunk_all = set()
+        for s in seq1_chunks:
+            seq1_chunk_all = seq1_chunk_all.union(s)
+        for spans in seq2_chunks:
+            if not spans.intersection(seq1_chunk_all):
+                for idx in spans:
+                    output_seq[int(idx)] = seq2[int(idx)]
+        return output_seq
 
     def apply_model(self, ner_model, features):
         """
@@ -150,6 +216,7 @@ class predict:
             feature (list): list of words list
         """
         return None
+
 
 class predict_w(predict):
     """prediction class for word level model (LSTM-CRF)
@@ -165,15 +232,16 @@ class predict_w(predict):
         batch_size: size of batch in decoding
         caseless: caseless or not
     """
-   
-    def __init__(self, if_cuda, f_map, l_map, pad_word, pad_label, start_label, label_seq = True, batch_size = 50, caseless=True):
+
+    def __init__(self, if_cuda, f_map, l_map, pad_word, pad_label, start_label, label_seq=True, batch_size=50,
+                 caseless=True):
         predict.__init__(self, if_cuda, l_map, label_seq, batch_size)
         self.decoder = CRFDecode_vb(len(l_map), start_label, pad_label)
         self.pad_word = pad_word
         self.f_map = f_map
         self.l_map = l_map
         self.caseless = caseless
-        
+
     def apply_model(self, ner_model, features):
         """
         apply_model function for LSTM-CRF
@@ -202,6 +270,7 @@ class predict_w(predict):
 
         return decoded
 
+
 class predict_wc(predict):
     """prediction class for LM-LSTM-CRF
 
@@ -218,8 +287,9 @@ class predict_wc(predict):
         batch_size: size of batch in decoding
         caseless: caseless or not
     """
-   
-    def __init__(self, if_cuda, f_map, c_map, l_map, pad_word, pad_char, pad_label, start_label, label_seq = True, batch_size = 50, caseless=True):
+
+    def __init__(self, if_cuda, f_map, c_map, l_map, pad_word, pad_char, pad_label, start_label, label_seq=True,
+                 batch_size=50, caseless=True):
         predict.__init__(self, if_cuda, l_map, label_seq, batch_size)
         self.decoder = CRFDecode_vb(len(l_map), start_label, pad_label)
         self.pad_word = pad_word
@@ -228,7 +298,7 @@ class predict_wc(predict):
         self.c_map = c_map
         self.l_map = l_map
         self.caseless = caseless
-        
+
     def apply_model(self, ner_model, features, file_no):
         """
         apply_model function for LM-LSTM-CRF
@@ -240,20 +310,22 @@ class predict_wc(predict):
         char_features = encode2char_safe(features, self.c_map)
 
         if self.caseless:
-            word_features = encode_safe(list(map(lambda t: list(map(lambda x: x.lower(), t)), features)), self.f_map, self.f_map['<unk>'])
+            word_features = encode_safe(list(map(lambda t: list(map(lambda x: x.lower(), t)), features)), self.f_map,
+                                        self.f_map['<unk>'])
         else:
             word_features = encode_safe(features, self.f_map, self.f_map['<unk>'])
 
-        fea_len = [list( map( lambda t: len(t) + 1, f) ) for f in char_features]
+        fea_len = [list(map(lambda t: len(t) + 1, f)) for f in char_features]
         forw_features = concatChar(char_features, self.c_map)
 
         word_len = max(map(lambda t: len(t) + 1, word_features))
         char_len = max(map(lambda t: len(t[0]) + word_len - len(t[1]), zip(forw_features, word_features)))
-        forw_t = list( map( lambda t: t + [self.pad_char] * ( char_len - len(t) ), forw_features ) )
-        back_t = torch.LongTensor( list( map( lambda t: t[::-1], forw_t ) ) )
-        forw_t = torch.LongTensor( forw_t )
-        forw_p = torch.LongTensor( list( map( lambda t: list(itertools.accumulate( t + [1] * (word_len - len(t) ) ) ), fea_len) ) )
-        back_p = torch.LongTensor( list( map( lambda t: [char_len - 1] + [ char_len - 1 - tup for tup in t[:-1] ], forw_p) ) )
+        forw_t = list(map(lambda t: t + [self.pad_char] * (char_len - len(t)), forw_features))
+        back_t = torch.LongTensor(list(map(lambda t: t[::-1], forw_t)))
+        forw_t = torch.LongTensor(forw_t)
+        forw_p = torch.LongTensor(
+            list(map(lambda t: list(itertools.accumulate(t + [1] * (word_len - len(t)))), fea_len)))
+        back_p = torch.LongTensor(list(map(lambda t: [char_len - 1] + [char_len - 1 - tup for tup in t[:-1]], forw_p)))
 
         masks = torch.ByteTensor(list(map(lambda t: [1] * (len(t) + 1) + [0] * (word_len - len(t) - 1), word_features)))
         word_t = torch.LongTensor(list(map(lambda t: t + [self.pad_word] * (word_len - len(t)), word_features)))
