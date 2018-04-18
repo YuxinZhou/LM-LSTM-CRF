@@ -20,6 +20,7 @@ import torch.nn.init
 
 from model.ner_dataset import *
 
+
 zip = getattr(itertools, 'izip', zip)
 
 
@@ -219,9 +220,9 @@ def read_corpus(lines):
     tmp_ll = list()
     for line in lines:
         if not (line.isspace() or (len(line) > 10 and line[0:10] == '-DOCSTART-')):
-            line = line.rstrip('\n').split()
+            line = line.rstrip('\n').split('\t')
             tmp_fl.append(line[0])
-            tmp_ll.append(line[-1])
+            tmp_ll.append(line[1])
         elif len(tmp_fl) > 0:
             features.append(tmp_fl)
             labels.append(tmp_ll)
@@ -230,7 +231,6 @@ def read_corpus(lines):
     if len(tmp_fl) > 0:
         features.append(tmp_fl)
         labels.append(tmp_ll)
-
     return features, labels
 
 def read_features(lines): #NEW
@@ -666,7 +666,8 @@ def iob_to_spans(sequence, lut, strict_iob2=False):
     return set(chunks)
 
 # Turn a sequence of IOBES chunks into single tokens
-def iobes_to_spans(sequence, lut, strict_iob2=False):
+# when lut is None, the sequence should be in string format
+def iobes_to_spans(sequence, lut=None, strict_iob2=False):
     """
     convert to iobes to span
     """
@@ -675,7 +676,10 @@ def iobes_to_spans(sequence, lut, strict_iob2=False):
     current = None
 
     for i, y in enumerate(sequence):
-        label = lut[y]
+        if lut:
+            label = lut[y]
+        else:
+            label = y
 
         if label.startswith('B-'):
 
@@ -808,3 +812,11 @@ def init_lstm(input_lstm):
             weight = eval('input_lstm.bias_hh_l'+str(ind))
             weight.data.zero_()
             weight.data[input_lstm.hidden_size: 2 * input_lstm.hidden_size] = 1
+
+def unify(tags, replace):
+    new_tags = []
+    for tag in tags:
+        for i, j in replace:
+            tag = tag.replace(i, j)
+        new_tags.append(tag)
+    return new_tags

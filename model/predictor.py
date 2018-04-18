@@ -16,6 +16,7 @@ from model.crf import CRFDecode_vb
 from model.utils import *
 
 
+
 class predict:
     """Base class for prediction, provide method to calculate f1 score and accuracy 
 
@@ -143,11 +144,16 @@ class predict:
                     l = labels[ind2 - ind][0: len(f)]
                     fout.write(self.decode_str(features[ind2], l) + '\n\n')
 
-    def combined_output_batch(self, ner_model, documents, fout, dataset_no, strategy="best"):
+    ####################################
+    # added for combination
+    ####################################
+
+    def combined_output_batch(self, ner_model, documents, fout, dataset_no, scope, strategy="best"):
         """ Combine 5 result and output
         args:
             ner_model: sequence labeling model
             feature (list): list of words list
+            scope (list):
             fout: output file
         """
         ner_model.eval()  # Sets the module in evaluation mode.
@@ -155,7 +161,6 @@ class predict:
         d_len = len(documents)
         for d_ind in tqdm(range(0, d_len), mininterval=1,
                           desc=' - Process', leave=False, file=sys.stdout):
-            fout.write('-DOCSTART- -DOCSTART- -DOCSTART-\n\n')
             features = documents[d_ind]
             f_len = len(features)
 
@@ -163,19 +168,24 @@ class predict:
             for ind in range(0, f_len, self.batch_size):
                 eind = min(f_len, ind + self.batch_size)
                 seperate_predictions = []
-                for i in range(dataset_no):  # iterate on five CDR
+                for i in range(dataset_no):  # iterate on five CRF
                     labels, path_score = self.apply_model(ner_model, features[ind: eind], i)
                     labels = torch.unbind(labels, 1)
                     for ind2 in range(ind, eind):
                         f = features[ind2]
-                        l = labels[ind2 - ind][0: len(f)]
-                        print(path_score)
+                        l_idx = labels[ind2 - ind][0: len(f)]
+                        l = [self.r_l_map[label] for label in l_idx]
+                        if scope != ['ALL']:
+                            for i in range(len(l)):
+                                if l[i][2:] not in scope:
+                                    l[i] = 'O'
                         seperate_predictions.append((path_score, l))
-                if strategy == "vote":
+                if strategy == "vote": # todo
                     combine = self.combine_prediction_vote(seperate_predictions)
                 else:  # best path
                     combine = self.combine_prediction(seperate_predictions)
-                fout.write(self.decode_str(features[0], combine) + '\n\n')
+        # fout.write('\n'.join(map(lambda t: t[0] + ' ' + t[1], zip(features[0], combine))) + '\n\n')
+        return combine
 
     def combine_prediction(self, seperate_predictions):
         """
@@ -184,7 +194,7 @@ class predict:
         :return: a combined prediction
         """
         seperate_predictions.sort()
-        combined = seperate_predictions[0][1].clone()  # first prediction sequence
+        combined = seperate_predictions[0][1][:]  # first prediction sequence
         for idx in range(1, len(seperate_predictions)):
             label_seq = seperate_predictions[idx][1]
             combined = self.combine_seq(label_seq, combined)
@@ -193,11 +203,11 @@ class predict:
     def combine_seq(self, seq1, seq2):
         # seq1 has higher priority, and we retain all chunks in seq1.
         # We add chunks in seq2 if it does not conflict with chunks in seq1.
-        seq1_chunks = iobes_to_spans(seq1, self.r_l_map)
+        seq1_chunks = iobes_to_spans(seq1)
         seq1_chunks = [set(chunk.split('@')[1:]) for chunk in seq1_chunks]
-        seq2_chunks = iobes_to_spans(seq2, self.r_l_map)
+        seq2_chunks = iobes_to_spans(seq2)
         seq2_chunks = [set(chunk.split('@')[1:]) for chunk in seq2_chunks]
-        output_seq = seq1.clone()
+        output_seq = seq1[:]
         seq1_chunk_all = set()
         for s in seq1_chunks:
             seq1_chunk_all = seq1_chunk_all.union(s)
@@ -206,6 +216,10 @@ class predict:
                 for idx in spans:
                     output_seq[int(idx)] = seq2[int(idx)]
         return output_seq
+
+        ####################################
+        #  stop adding
+        ####################################
 
     def apply_model(self, ner_model, features):
         """

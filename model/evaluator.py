@@ -5,7 +5,6 @@
 .. moduleauthor:: Liyuan Liu, Frank Xu
 """
 
-
 import torch
 import numpy as np
 import itertools
@@ -15,6 +14,64 @@ from torch.autograd import Variable
 
 from model.crf import CRFDecode_vb
 
+
+class eval_sentence:
+    def __init__(self):
+        self.correct_labels = 0
+        self.total_labels = 0
+        self.gold_count = 0
+        self.guess_count = 0
+        self.overlap_count = 0
+
+    def reset(self):
+        self.correct_labels = 0
+        self.total_labels = 0
+        self.gold_count = 0
+        self.guess_count = 0
+        self.overlap_count = 0
+
+    def f1_score(self):
+        """
+        calculate f1 score based on statics
+        """
+        if self.guess_count == 0:
+            return 0.0, 0.0, 0.0, 0.0
+        precision = self.overlap_count / float(self.guess_count)
+        recall = self.overlap_count / float(self.gold_count)
+        if precision == 0.0 or recall == 0.0:
+            return 0.0, 0.0, 0.0, 0.0
+        f = 2 * (precision * recall) / (precision + recall)
+        accuracy = float(self.correct_labels) / self.total_labels
+        return f, precision, recall, accuracy
+
+    def eval_sent(self, pred, gold):
+        """
+        update statics for one instance
+
+        args:
+            pred (seq_len): predicted
+            gold (seq_len): ground-truth
+        """
+        total_labels = len(pred)
+        correct_labels = sum(p == g for p, g in zip(pred, gold))
+        gold_chunks = utils.iobes_to_spans(gold)
+        gold_count = len(gold_chunks)
+
+        guess_chunks = utils.iobes_to_spans(pred)
+        guess_count = len(guess_chunks)
+
+        overlap_chunks = gold_chunks & guess_chunks
+        overlap_count = len(overlap_chunks)
+
+        self.correct_labels += correct_labels
+        self.total_labels += total_labels
+        self.gold_count += gold_count
+        self.guess_count += guess_count
+        self.overlap_count += overlap_count
+
+        return correct_labels, total_labels, gold_count, guess_count, overlap_count
+
+
 class eval_batch:
     """Base class for evaluation, provide method to calculate f1 score and accuracy 
 
@@ -22,7 +79,6 @@ class eval_batch:
         packer: provide method to convert target into original space [TODO: need to improve] 
         l_map: dictionary for labels    
     """
-   
 
     def __init__(self, packer, l_map):
         self.packer = packer
@@ -57,8 +113,8 @@ class eval_batch:
             gold = gold[:length]
             best_path = decoded[:length]
 
-
-            correct_labels_i, total_labels_i, gold_count_i, guess_count_i, overlap_count_i = self.eval_instance(best_path.numpy(), gold.numpy())
+            correct_labels_i, total_labels_i, gold_count_i, guess_count_i, overlap_count_i = self.eval_instance(
+                best_path.numpy(), gold.numpy())
             self.correct_labels += correct_labels_i
             self.total_labels += total_labels_i
             self.gold_count += gold_count_i
@@ -107,7 +163,7 @@ class eval_batch:
         if 0 == self.total_labels:
             return 0.0
         accuracy = float(self.correct_labels) / self.total_labels
-        return accuracy        
+        return accuracy
 
     def eval_instance(self, best_path, gold):
         """
@@ -130,6 +186,7 @@ class eval_batch:
 
         return correct_labels, total_labels, gold_count, guess_count, overlap_count
 
+
 class eval_w(eval_batch):
     """evaluation class for word level model (LSTM-CRF)
 
@@ -139,10 +196,10 @@ class eval_w(eval_batch):
         score_type: use f1score with using 'f'
 
     """
-   
+
     def __init__(self, packer, l_map, score_type):
         eval_batch.__init__(self, packer, l_map)
-        
+
         self.decoder = CRFDecode_vb(len(l_map), l_map['<start>'], l_map['<pad>'])
 
         if 'f' in score_type:
@@ -162,7 +219,7 @@ class eval_w(eval_batch):
         """
         ner_model.eval()
         self.reset()
-                
+
         for feature, tg, mask in itertools.chain.from_iterable(dataset_loader):
             fea_v, _, mask_v = self.packer.repack_vb(feature, tg, mask)
             scores, _ = ner_model(fea_v)
@@ -171,6 +228,7 @@ class eval_w(eval_batch):
             self.eval_b(decoded, tg)
 
         return self.calc_s()
+
 
 class eval_wc(eval_batch):
     """evaluation class for LM-LSTM-CRF
@@ -181,10 +239,10 @@ class eval_wc(eval_batch):
         score_type: use f1score with using 'f'
 
     """
-   
+
     def __init__(self, packer, l_map, score_type):
         eval_batch.__init__(self, packer, l_map)
-        
+
         self.decoder = CRFDecode_vb(len(l_map), l_map['<start>'], l_map['<pad>'])
 
         if 'f' in score_type:
