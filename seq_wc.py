@@ -107,5 +107,10 @@ if __name__ == "__main__":
 
         evaluator.eval_sent(combined_pred, label[0])
     fout.close()
-    print(args.input_file)
-    print(evaluator.f1_score())
+    f = open('output', 'a')
+    f.write(args.input_file)
+    f.write('\n')
+    F1, prec, recall, acc = evaluator.f1_score()
+    f.write("{0} {1} {2} {3}".format(F1, prec, recall, acc))
+    f.write('\n')
+    f.write('\n')
